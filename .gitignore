@@ -1,0 +1,45 @@
+# Git Ignore File
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.git
+.DS_Store
+.env
+tmp/
+temp/
+node_modules/
+
+# Local PDF files (generated)
+*.pdf
+
+# Large DB files - TOO LARGE FOR RAILWAY UPLOAD (500MB limit)
+# Use Railway Volume or Cloud Database instead
+ChromaDB/
+
+# Flutter directories (keep Flutter app separate from backend)
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+android/
+ios/
+windows/
+linux/
+macos/
+api/
+build/
+New-Legal-Connect/
