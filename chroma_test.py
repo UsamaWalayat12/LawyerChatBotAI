@@ -610,6 +610,7 @@ except Exception as e:
 def load_history(user_id: str = "default", conversation_id: str = None) -> List[Dict[str, str]]:
     """Load chat history from Supabase."""
     if not SUPABASE_AVAILABLE:
+        print("[Supabase] load_history skipped: Client not available")
         return []
     
     try:
@@ -620,11 +621,17 @@ def load_history(user_id: str = "default", conversation_id: str = None) -> List[
             query = query.eq('conversation_id', conversation_id)
         
         response = query.order('created_at').execute()
+        
+        # Check for error
+        if hasattr(response, 'error') and response.error:
+            print(f"[Supabase] load_history error: {response.error}")
+            return []
+
         if response.data:
             return [{"role": msg["role"], "content": msg["content"]} for msg in response.data]
         return []
     except Exception as e:
-        print(f"Error loading history from Supabase: {e}")
+        print(f"[Supabase] Critical error in load_history: {e}")
         return []
 
 def save_history(history: List[Dict[str, str]], user_id: str = "default"):
@@ -636,23 +643,29 @@ def save_history(history: List[Dict[str, str]], user_id: str = "default"):
 def add_to_history(history: List[Dict[str, str]], role: str, content: str, user_id: str = "default", conversation_id: str = "default"):
     """Add a message to history in Supabase."""
     if not SUPABASE_AVAILABLE:
+        print("[Supabase] add_to_history using fallback: Client not available")
         # Fallback: just append to in-memory history
         history.append({"role": role, "content": content})
         return
     
     try:
         from datetime import datetime
-        supabase.table('chat_messages').insert({
+        response = supabase.table('chat_messages').insert({
             "user_id": user_id,
             "role": role,
             "content": content,
             "conversation_id": conversation_id,
             "created_at": datetime.now().isoformat()
         }).execute()
+        
+        # Check for error
+        if hasattr(response, 'error') and response.error:
+            print(f"[Supabase] add_to_history error: {response.error}")
+        
         # Also add to in-memory history for current session
         history.append({"role": role, "content": content})
     except Exception as e:
-        print(f"Error adding to Supabase history: {e}")
+        print(f"[Supabase] Critical error in add_to_history: {e}")
         # Fallback: just append to in-memory history
         history.append({"role": role, "content": content})
 
