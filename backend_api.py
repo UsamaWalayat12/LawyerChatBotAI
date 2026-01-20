@@ -144,15 +144,22 @@ async def chat(request: ChatRequest):
     try:
         query = request.query.strip()
         user_id = request.user_id or "default"
+        conversation_id = request.conversation_id
         
         if not query:
             raise HTTPException(status_code=400, detail="Query cannot be empty")
         
-        # Load history for this user
-        history = load_history(user_id)
+        # Generate new conversation_id if not provided
+        if not conversation_id:
+            import uuid
+            conversation_id = f"conv_{uuid.uuid4().hex[:16]}"
+            print(f"[API] Created new conversation: {conversation_id}")
+        
+        # Load history for this user and conversation
+        history = load_history(user_id, conversation_id)
         
         # Add user query to history
-        add_to_history(history, "user", query, user_id)
+        add_to_history(history, "user", query, user_id, conversation_id)
         
         # Retrieve evidence
         print(f"[API] Processing query: {query[:100]}...")
@@ -187,7 +194,7 @@ async def chat(request: ChatRequest):
             print(f"[API] Received AI response ({len(answer)} chars)")
         
         # Add assistant response to history
-        add_to_history(history, "assistant", answer, user_id)
+        add_to_history(history, "assistant", answer, user_id, conversation_id)
         
         # Generate message ID
         message_id = f"msg_{len(history)}"
@@ -197,7 +204,7 @@ async def chat(request: ChatRequest):
             "answer": answer,
             "timestamp": datetime.now().isoformat(),
             "message_id": message_id,
-            "conversation_id": request.conversation_id
+            "conversation_id": conversation_id
         }
         
     except Exception as e:
@@ -208,18 +215,19 @@ async def chat(request: ChatRequest):
 
 # Get history endpoint
 @app.get("/api/history", response_model=HistoryResponse)
-async def get_history(user_id: Optional[str] = "default"):
+async def get_history(user_id: Optional[str] = "default", conversation_id: Optional[str] = None):
     """
-    Get complete chat history for a specific user
+    Get chat history for a specific user and optionally a specific conversation
     
     Args:
         user_id: User ID to filter history (query parameter)
+        conversation_id: Optional conversation ID to filter history
     
     Returns:
-        HistoryResponse with all messages for the user
+        HistoryResponse with messages
     """
     try:
-        history = load_history(user_id)
+        history = load_history(user_id, conversation_id)
         
         return {
             "success": True,
@@ -244,28 +252,56 @@ async def get_conversations(user_id: Optional[str] = "default"):
         List of conversations with metadata
     """
     try:
-        # For now, we'll return a simple structure
-        # In the future, you can enhance this to group messages by conversation_id
-        history = load_history(user_id)
+        # Get all messages for this user from Supabase
+        if not SUPABASE_AVAILABLE:
+            return {"success": True, "conversations": []}
         
-        # Create a single conversation entry for all messages
-        if history:
-            from datetime import datetime
-            return {
-                "success": True,
-                "conversations": [{
-                    "id": "default",
-                    "title": "Legal Chat",
-                    "timestamp": datetime.now().isoformat(),
-                    "messageCount": len(history),
-                    "lastMessageTime": datetime.now().isoformat()
-                }]
-            }
-        else:
-            return {
-                "success": True,
-                "conversations": []
-            }
+        from chroma_test import supabase
+        response = supabase.table('chat_messages').select('*').eq('user_id', user_id).order('created_at').execute()
+        
+        if not response.data:
+            return {"success": True, "conversations": []}
+        
+        # Group messages by conversation_id
+        conversations_dict = {}
+        for msg in response.data:
+            conv_id = msg.get('conversation_id', 'default')
+            if conv_id not in conversations_dict:
+                conversations_dict[conv_id] = {
+                    'messages': [],
+                    'first_message_time': msg['created_at'],
+                    'last_message_time': msg['created_at']
+                }
+            conversations_dict[conv_id]['messages'].append(msg)
+            conversations_dict[conv_id]['last_message_time'] = msg['created_at']
+        
+        # Build conversation list
+        conversations = []
+        for conv_id, data in conversations_dict.items():
+            # Get title from first user message (truncate to 50 chars)
+            title = "New Chat"
+            for msg in data['messages']:
+                if msg['role'] == 'user':
+                    title = msg['content'][:50]
+                    if len(msg['content']) > 50:
+                        title += "..."
+                    break
+            
+            conversations.append({
+                "id": conv_id,
+                "title": title,
+                "timestamp": data['first_message_time'],
+                "messageCount": len(data['messages']),
+                "lastMessageTime": data['last_message_time']
+            })
+        
+        # Sort by last message time (newest first)
+        conversations.sort(key=lambda x: x['lastMessageTime'], reverse=True)
+        
+        return {
+            "success": True,
+            "conversations": conversations
+        }
         
     except Exception as e:
         print(f"Error getting conversations: {e}")
@@ -273,12 +309,11 @@ async def get_conversations(user_id: Optional[str] = "default"):
 
 # Clear history endpoint
 @app.delete("/api/history/clear")
-async def clear_history():
-    """Clear all chat history"""
+async def clear_history(user_id: Optional[str] = "default", conversation_id: Optional[str] = None):
+    """Clear chat history for a user or specific conversation"""
     try:
-        history_file = "chat_history.json"
-        if os.path.exists(history_file):
-            os.remove(history_file)
+        from chroma_test import clear_history as supabase_clear_history
+        supabase_clear_history(user_id, conversation_id)
         
         return {
             "success": True,
