@@ -253,14 +253,26 @@ async def get_conversations(user_id: Optional[str] = "default"):
     """
     try:
         # Get all messages for this user from Supabase
+        from chroma_test import SUPABASE_AVAILABLE
         if not SUPABASE_AVAILABLE:
             return {"success": True, "conversations": []}
         
         from chroma_test import supabase
-        response = supabase.table('chat_messages').select('*').eq('user_id', user_id).order('created_at').execute()
+        query = supabase.table('chat_messages').select('*').eq('user_id', user_id).order('created_at')
         
+        print(f"[API] Fetching conversations for user: {user_id}")
+        response = query.execute()
+        
+        # Check for explicit Postgrest error
+        if hasattr(response, 'error') and response.error:
+            print(f"[API] Supabase/Postgrest Error: {response.error}")
+            raise Exception(f"Postgrest error: {response.error}")
+
         if not response.data:
+            print(f"[API] No conversations found for user: {user_id}")
             return {"success": True, "conversations": []}
+        
+        print(f"[API] Found {len(response.data)} messages. Grouping into conversations...")
         
         # Group messages by conversation_id
         conversations_dict = {}
@@ -296,7 +308,12 @@ async def get_conversations(user_id: Optional[str] = "default"):
             })
         
         # Sort by last message time (newest first)
-        conversations.sort(key=lambda x: x['lastMessageTime'], reverse=True)
+        try:
+            conversations.sort(key=lambda x: x.get('lastMessageTime') or "", reverse=True)
+        except Exception as sort_err:
+            print(f"[API] Sorting error: {sort_err}")
+            # Continue without sorting if it fails
+            pass
         
         return {
             "success": True,
@@ -304,7 +321,10 @@ async def get_conversations(user_id: Optional[str] = "default"):
         }
         
     except Exception as e:
-        print(f"Error getting conversations: {e}")
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"[API] CRITICAL ERROR in get_conversations: {e}")
+        print(f"[API] Traceback: {error_details}")
         raise HTTPException(status_code=500, detail=f"Error retrieving conversations: {str(e)}")
 
 # Clear history endpoint
