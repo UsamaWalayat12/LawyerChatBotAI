@@ -607,13 +607,19 @@ except Exception as e:
     SUPABASE_AVAILABLE = False
     supabase = None
 
-def load_history(user_id: str = "default") -> List[Dict[str, str]]:
+def load_history(user_id: str = "default", conversation_id: str = None) -> List[Dict[str, str]]:
     """Load chat history from Supabase."""
     if not SUPABASE_AVAILABLE:
         return []
     
     try:
-        response = supabase.table('chat_messages').select('*').eq('user_id', user_id).order('created_at').execute()
+        query = supabase.table('chat_messages').select('*').eq('user_id', user_id)
+        
+        # Filter by conversation_id if provided
+        if conversation_id:
+            query = query.eq('conversation_id', conversation_id)
+        
+        response = query.order('created_at').execute()
         if response.data:
             return [{"role": msg["role"], "content": msg["content"]} for msg in response.data]
         return []
@@ -627,7 +633,7 @@ def save_history(history: List[Dict[str, str]], user_id: str = "default"):
     # Individual messages are now saved via add_to_history
     pass
 
-def add_to_history(history: List[Dict[str, str]], role: str, content: str, user_id: str = "default"):
+def add_to_history(history: List[Dict[str, str]], role: str, content: str, user_id: str = "default", conversation_id: str = "default"):
     """Add a message to history in Supabase."""
     if not SUPABASE_AVAILABLE:
         # Fallback: just append to in-memory history
@@ -640,6 +646,7 @@ def add_to_history(history: List[Dict[str, str]], role: str, content: str, user_
             "user_id": user_id,
             "role": role,
             "content": content,
+            "conversation_id": conversation_id,
             "created_at": datetime.now().isoformat()
         }).execute()
         # Also add to in-memory history for current session
@@ -662,15 +669,23 @@ def format_history_for_prompt(history: List[Dict[str, str]], max_history: int = 
         formatted += f"{role}: {content}\n\n"
     return formatted
 
-def clear_history(user_id: str = "default"):
-    """Clear all chat history for a specific user."""
+def clear_history(user_id: str = "default", conversation_id: str = None):
+    """Clear all chat history for a specific user, or a specific conversation."""
     if not SUPABASE_AVAILABLE:
         print("Supabase not available, cannot clear history.")
         return
     
     try:
-        supabase.table('chat_messages').delete().eq('user_id', user_id).execute()
-        print(f"Chat history cleared for user: {user_id}")
+        query = supabase.table('chat_messages').delete().eq('user_id', user_id)
+        if conversation_id:
+            query = query.eq('conversation_id', conversation_id)
+        
+        query.execute()
+        
+        if conversation_id:
+            print(f"Chat history cleared for user: {user_id}, conversation: {conversation_id}")
+        else:
+            print(f"Chat history cleared for user: {user_id}")
     except Exception as e:
         print(f"Error clearing history: {e}")
 
